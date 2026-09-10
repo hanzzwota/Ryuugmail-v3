@@ -21,7 +21,9 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
 });
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+type StatTone = "bg-primary text-primary-foreground" | "";
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: StatTone }) {
   return (
     <NeoCard className={tone ?? ""}>
       <p className="font-display text-[11px] font-bold uppercase tracking-widest opacity-70">
@@ -74,13 +76,25 @@ function DashboardPage() {
             <div
               className="h-full bg-secondary"
               style={{
-                width: `${quota.limit ? Math.min(100, (quota.used / quota.limit) * 100) : 0}%`,
+                width: `${
+                  quota.limit
+                    ? Math.min(100, (quota.used / quota.limit) * 100)
+                    : settings.daily_quota_enabled
+                      ? 0
+                      : -1
+                }%`,
               }}
             />
           </div>
           <p className="mt-2 text-sm font-medium text-muted-foreground">
-            Sisa kuota hari ini: {quota.remaining} akun • Rate {formatRp(settings.rate_per_account)}
-            /akun
+            {settings.daily_quota_enabled ? (
+              <>
+                Sisa kuota hari ini: {quota.remaining} akun • Rate{" "}
+                {formatRp(settings.rate_per_account)}/akun
+              </>
+            ) : (
+              <>Kuota harian: <span className="font-bold">TANPA BATAS</span></>
+            )}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link
