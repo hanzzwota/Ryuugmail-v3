@@ -5,6 +5,11 @@ import type { Database, Enums } from "@/integrations/supabase/types";
 
 type Client = SupabaseClient<Database>;
 
+/**
+ * Centralized admin authorization check
+ * ONLY allows specific admin users: ryuu0508
+ * Keeps user_roles table in sync
+ */
 async function assertAdmin(supabase: Client, userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   try {
@@ -20,7 +25,7 @@ async function assertAdmin(supabase: Client, userId: string) {
       return; // Authorized!
     }
 
-    // 2. Check candidate user email or metadata
+    // 2. Check candidate user email or metadata (STRICT: only ryuu0508)
     const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
     const { data: profile } = await supabaseAdmin
       .from("profiles")
@@ -35,23 +40,21 @@ async function assertAdmin(supabase: Client, userId: string) {
       ""
     ).toLowerCase();
 
-    const isCandidate =
+    // STRICT: Only allow ryuu0508
+    const isAuthorizedAdmin =
       username === "ryuu0508" ||
-      username === "admin" ||
       userEmail === "ryuu0508@gmail.com" ||
-      userEmail === "rehanrehanhidayat57@gmail.com" ||
-      userEmail === "admin@gmail.com" ||
-      userEmail.startsWith("admin@") ||
       userEmail.startsWith("ryuu0508@");
 
-    let shouldGrant = isCandidate;
+    let shouldGrant = isAuthorizedAdmin;
     if (!shouldGrant) {
-      // If no admin exists in user_roles table at all, make the user an admin
+      // If no admin exists in user_roles table at all, make the first user an admin
+      // (bootstrap scenario for fresh installations)
       const { count } = await supabaseAdmin
         .from("user_roles")
         .select("id", { count: "exact", head: true })
         .eq("role", "admin");
-      if ((count ?? 0) === 0) {
+      if ((count ?? 0) === 0 && isAuthorizedAdmin) {
         shouldGrant = true;
       }
     }
@@ -292,12 +295,16 @@ export const adminListUsers = createServerFn({ method: "GET" })
     const db = await admin();
     const [profiles, ledger, roles] = await Promise.all([
       db.from("profiles").select("*").order("created_at", { ascending: false }).limit(300),
-      db.from("balance_transactions").select("user_id, amount"),
+      db.from("balance_transactions").select("user_id, amount, type"),
       db.from("user_roles").select("user_id, role"),
     ]);
     const balances = new Map<string, number>();
-    for (const t of ledger.data ?? [])
-      balances.set(t.user_id, (balances.get(t.user_id) ?? 0) + t.amount);
+    // FIX: Only sum transactions with positive impact (CREDIT, REFUND)
+    for (const t of ledger.data ?? []) {
+      if (t.type === "CREDIT" || t.type === "REFUND" || t.type === "ADJUSTMENT") {
+        balances.set(t.user_id, (balances.get(t.user_id) ?? 0) + t.amount);
+      }
+    }
     const adminIds = new Set(
       (roles.data ?? []).filter((r) => r.role === "admin").map((r) => r.user_id),
     );
@@ -355,6 +362,8 @@ export const adminGetSettings = createServerFn({ method: "GET" })
         announcement_title: "Pengumuman Resmi",
         announcement: "Selamat datang di S3L RYU88 GMAIL.",
         rules_today: "Aturan setoran hari ini: Pastikan email fresh dan belum pernah terdaftar.",
+        human_support_enabled: true,
+        ai_faq_enabled: true,
         updated_at: new Date().toISOString(),
       };
       await db.from("settings").upsert(defaultSettings, { onConflict: "id" });
@@ -376,7 +385,6 @@ export const adminUpdateSettings = createServerFn({ method: "POST" })
       "max_bulk",
       "daily_quota_enabled",
       "max_bulk_enabled",
-
       "min_withdrawal",
       "submission_open",
       "deposit_password",
